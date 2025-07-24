@@ -3,13 +3,13 @@ import { getDatabase } from "https://www.gstatic.com/firebasejs/10.11.0/firebase
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js";
 
 const firebaseConfig = {
-  apiKey: "SUA_API_KEY",
-  authDomain: "SEU_AUTH_DOMAIN",
-  databaseURL: "SEU_DATABASE_URL",
-  projectId: "SEU_PROJECT_ID",
-  storageBucket: "SEU_BUCKET",
-  messagingSenderId: "SEU_SENDER_ID",
-  appId: "SEU_APP_ID"
+  apiKey: "AIzaSyDFV21RxM-SCPxvpeoWBNToP9g9LAJToN8",
+  authDomain: "diario-da-fisio.firebaseapp.com",
+  projectId: "diario-da-fisio",
+  storageBucket: "diario-da-fisio.firebasestorage.app",
+  messagingSenderId: "899479182054",
+  appId: "1:899479182054:web:f663c41394de5e0b8b3927",
+  measurementId: "G-WK77D6LT28"
 };
 
 const app = initializeApp(firebaseConfig);
