@@ -1,93 +1,198 @@
-<!DOCTYPE html>
+<!--
+  Arquivo: critico_app_with_auth.html
+  Instruções rápidas:
+  1) Crie um projeto no Firebase (https://console.firebase.google.com/)
+  2) Ative Authentication > Sign-in method > Email/Password
+  3) Ative Firestore Database (modo de teste ou regras apropriadas)
+  4) Cole suas credenciais no objeto firebaseConfig abaixo
+  5) Abra este arquivo em um browser (ou rode num servidor local)
+
+  Estrutura: single-file SPA
+  - Login / Registro (Firebase Auth)
+  - Dashboard de leitos (coleção users/{uid}/leitos)
+  - Tela ABCDE (salva em users/{uid}/avaliacoes/{leitoId})
+  - Histórico salvo em subcoleção users/{uid}/avaliacoes/{leitoId}/historico
+-->
+
+<!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Avaliação do Paciente Crítico</title>
-  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fisiopad — ABCDE com Autenticação</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f5f6fa;
-      margin: 0;
-      padding: 0;
-    }
-    header {
-      background-color: #4a69bd;
-      color: white;
-      padding: 15px;
-      text-align: center;
-    }
-    #dashboard, #avaliacao {
-      padding: 20px;
-    }
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 15px;
-      margin: 10px 0;
-      box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
-      cursor: pointer;
-    }
-    button {
-      padding: 10px 15px;
-      margin: 5px;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    .btn-add { background-color: #4cd137; color: white; }
-    .btn-remove { background-color: #e84118; color: white; }
-    .btn-back { background-color: #718093; color: white; }
-    .btn-save { background-color: #273c75; color: white; }
-    textarea, select, input {
-      width: 100%;
-      padding: 10px;
-      margin: 8px 0;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-    }
+    :root{--bg:#f7fafc;--card:#ffffff;--muted:#64748b;--accent:#2563eb;--ok:#16a34a;--danger:#ef4444}
+    *{box-sizing:border-box}
+    body{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:0; background:var(--bg); color:#0f172a}
+    header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:linear-gradient(90deg,#ffffff99,#f1f5f9);border-bottom:1px solid #e6eef6}
+    header h1{font-size:18px;margin:0}
+    .container{max-width:1200px;margin:18px auto;padding:12px}
+    .layout{display:grid;grid-template-columns:360px 1fr;gap:16px}
+    .card{background:var(--card);border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(2,6,23,0.06)}
+    .leito-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;border:1px solid #f1f5f9;margin-bottom:8px;cursor:pointer}
+    .leito-item .meta{font-size:13px;color:var(--muted)}
+    .btn{border:0;padding:8px 10px;border-radius:8px;cursor:pointer}
+    .btn-primary{background:var(--accent);color:white}
+    .btn-ghost{background:transparent;border:1px solid #e6eef6}
+    .btn-danger{background:var(--danger);color:white}
+    input, textarea, select{width:100%;padding:8px;border-radius:8px;border:1px solid #e6eef6;margin-top:6px}
+    label{font-size:13px;color:var(--muted);margin-top:8px;display:block}
+    .small{font-size:13px;color:var(--muted)}
+    .top-controls{display:flex;gap:8px;align-items:center}
+    .user-box{display:flex;gap:12px;align-items:center}
+    .status-dot{width:10px;height:10px;border-radius:50%}
+    .history-list{max-height:220px;overflow:auto;padding:6px}
+    .hidden{display:none}
+    @media(max-width:980px){.layout{grid-template-columns:1fr}} 
   </style>
 </head>
 <body>
   <header>
-    <h2>Dashboard - Pacientes Críticos</h2>
+    <h1>Fisiopad — ABCDE (Leitos)</h1>
+    <div class="user-box">
+      <div id="userEmail" class="small">—</div>
+      <button id="btnSignOut" class="btn btn-ghost hidden">Sair</button>
+    </div>
   </header>
 
-  <!-- DASHBOARD -->
-  <div id="dashboard">
-    <button class="btn-add" onclick="adicionarLeito()">Adicionar Leito</button>
-    <div id="lista-leitos"></div>
-  </div>
+  <main class="container">
+    <div id="authBox" class="card">
+      <h3>Entrar ou Registrar</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="email" type="email" placeholder="seu@exemplo.com" style="flex:1">
+        <input id="password" type="password" placeholder="Senha (>=6)" style="width:220px">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="btnLogin" class="btn btn-primary">Entrar</button>
+        <button id="btnRegister" class="btn btn-ghost">Registrar</button>
+        <div id="authMsg" class="small" style="margin-left:8px"></div>
+      </div>
+      <div class="small" style="margin-top:8px;color:var(--muted)">Obs: ative o Email/Password no painel do Firebase e cole as config no topo do arquivo.</div>
+    </div>
 
-  <!-- AVALIAÇÃO -->
-  <div id="avaliacao" style="display:none;">
-    <h3 id="titulo-leito"></h3>
-    <form id="form-avaliacao">
-      <label>A - Airway (Via Aérea)</label>
-      <textarea id="airway"></textarea>
-      
-      <label>B - Breathing (Respiração)</label>
-      <textarea id="breathing"></textarea>
-      
-      <label>C - Circulation (Circulação)</label>
-      <textarea id="circulation"></textarea>
-      
-      <label>D - Disability (Neurológico)</label>
-      <textarea id="disability"></textarea>
-      
-      <label>E - Exposure (Exposição)</label>
-      <textarea id="exposure"></textarea>
+    <div id="app" class="hidden">
+      <div class="layout">
+        <!-- SIDEBAR / DASHBOARD -->
+        <aside>
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <h3 style="margin:0">Dashboard — Leitos</h3>
+              <div class="top-controls">
+                <button id="btnNewLeito" class="btn btn-primary">➕ Novo</button>
+              </div>
+            </div>
 
-      <button type="button" class="btn-save" onclick="salvarAvaliacao()">Salvar Avaliação</button>
-      <button type="button" class="btn-back" onclick="voltarDashboard()">Voltar</button>
-    </form>
-  </div>
+            <div style="margin-top:10px">
+              <input id="filter" placeholder="Pesquisar leito (nome/ID)">
+            </div>
 
-  <script>
-    // Configuração Firebase
-   const firebaseConfig = {
+            <div id="leitosList" style="margin-top:12px;max-height:460px;overflow:auto"></div>
+            <div style="margin-top:8px" class="small">Leitos sincronizados com seu usuário no Firebase.</div>
+          </div>
+
+          <div class="card" style="margin-top:12px">
+            <h4 style="margin:0">Usuário</h4>
+            <div class="small" style="margin-top:8px">Você está logado como <strong id="uidDisplay">—</strong></div>
+            <div style="margin-top:10px">
+              <button id="btnSignOut2" class="btn btn-ghost">Sair</button>
+            </div>
+          </div>
+        </aside>
+
+        <!-- MAIN: AVALIAÇÃO -->
+        <section>
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <h3 id="tituloAvaliacao">Selecione um leito para começar</h3>
+              <div>
+                <button id="btnOpenHistory" class="btn btn-ghost hidden">Ver Histórico</button>
+              </div>
+            </div>
+
+            <div id="avaliacaoArea" class="hidden" style="margin-top:12px">
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+                <div>
+                  <label>Nome do paciente / ID do leito</label>
+                  <input id="inputNome" placeholder="LEITO_01 — João" />
+                </div>
+                <div>
+                  <label>Responsável</label>
+                  <input id="inputResponsavel" placeholder="Equipe / Médico" />
+                </div>
+              </div>
+
+              <hr style="margin:12px 0;border:none;border-top:1px solid #f1f5f9">
+
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+                <div>
+                  <label>FR (rpm)</label>
+                  <input id="fr" type="number" min="0" placeholder=""> 
+                </div>
+                <div>
+                  <label>SpO₂ (%)</label>
+                  <input id="spo2" type="number" min="0" max="100" placeholder=""> 
+                </div>
+                <div>
+                  <label>FC (bpm)</label>
+                  <input id="fc" type="number" min="0" placeholder=""> 
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:10px">
+                <div>
+                  <label>A — Airway</label>
+                  <textarea id="obsA" placeholder="Via aérea: pérvia / risco / intubado..."></textarea>
+                </div>
+                <div>
+                  <label>B — Breathing</label>
+                  <textarea id="obsB" placeholder="Respiração: FR, uso de ajudantes, SpO2, suporte ventilatório..."></textarea>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:10px">
+                <div>
+                  <label>C — Circulation</label>
+                  <textarea id="obsC" placeholder="FC, PA, sangramento, perfusão..."></textarea>
+                </div>
+                <div>
+                  <label>D — Disability</label>
+                  <textarea id="obsD" placeholder="GCS, pupilas, AVPU, glicemia..."></textarea>
+                </div>
+              </div>
+
+              <div style="margin-top:10px">
+                <label>E — Exposure</label>
+                <textarea id="obsE" placeholder="Lesões, temperatura, erupções, trauma..."></textarea>
+              </div>
+
+              <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+                <button id="btnSave" class="btn btn-primary">Salvar avaliação</button>
+                <button id="btnSaveLocal" class="btn btn-ghost">Salvar local (cache)</button>
+                <button id="btnBackToDashboard" class="btn btn-ghost">Voltar ao Dashboard</button>
+                <div class="small" style="margin-left:auto">Último salvamento: <span id="lastSaved">—</span></div>
+              </div>
+
+              <div id="historyModal" class="hidden card" style="margin-top:12px">
+                <h4>Histórico do leito</h4>
+                <div class="history-list" id="historyList"></div>
+                <div style="display:flex;gap:8px;margin-top:8px"><button id="btnCloseHistory" class="btn btn-ghost">Fechar</button></div>
+              </div>
+            </div>
+
+            <div id="emptyInfo" style="margin-top:12px;color:var(--muted)">Escolha um leito do painel à esquerda ou crie um novo leito.</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    // ====== CONFIGURE AQUI: cole suas credenciais do Firebase ======
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
+    import { getFirestore, collection, doc, setDoc, getDoc, addDoc, getDocs, deleteDoc, query, orderBy, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
+
+const firebaseConfig = {
   apiKey: "AIzaSyAh4cDk7h-x0IekJyQEvP4FUbHds6z7Dtc",
   authDomain: "passagem-plantao2025.firebaseapp.com",
   projectId: "passagem-plantao2025",
@@ -95,77 +200,245 @@
   messagingSenderId: "46390981643",
   appId: "1:46390981643:web:158251408fe14ac4ba030e"
 };
-    const app = firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
 
-    let leitos = [];
-    let leitoAtual = null;
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
 
-    function renderizarLeitos() {
-      const lista = document.getElementById('lista-leitos');
-      lista.innerHTML = '';
-      leitos.forEach((leito, i) => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-          <strong>${leito}</strong>
-          <button class='btn-remove' onclick='removerLeito(${i})'>Remover</button>
-        `;
-        card.onclick = () => abrirAvaliacao(leito);
-        lista.appendChild(card);
-      });
+    // ====== UI refs ======
+    const authBox = document.getElementById('authBox');
+    const appBox = document.getElementById('app');
+    const emailInput = document.getElementById('email');
+    const passInput = document.getElementById('password');
+    const btnLogin = document.getElementById('btnLogin');
+    const btnRegister = document.getElementById('btnRegister');
+    const authMsg = document.getElementById('authMsg');
+    const userEmail = document.getElementById('userEmail');
+    const btnSignOut = document.getElementById('btnSignOut');
+    const btnSignOut2 = document.getElementById('btnSignOut2');
+
+    const leitosList = document.getElementById('leitosList');
+    const btnNewLeito = document.getElementById('btnNewLeito');
+    const filter = document.getElementById('filter');
+
+    const tituloAvaliacao = document.getElementById('tituloAvaliacao');
+    const avaliacaoArea = document.getElementById('avaliacaoArea');
+    const emptyInfo = document.getElementById('emptyInfo');
+
+    const inputNome = document.getElementById('inputNome');
+    const inputResponsavel = document.getElementById('inputResponsavel');
+    const fr = document.getElementById('fr');
+    const spo2 = document.getElementById('spo2');
+    const fc = document.getElementById('fc');
+    const obsA = document.getElementById('obsA');
+    const obsB = document.getElementById('obsB');
+    const obsC = document.getElementById('obsC');
+    const obsD = document.getElementById('obsD');
+    const obsE = document.getElementById('obsE');
+    const btnSave = document.getElementById('btnSave');
+    const btnSaveLocal = document.getElementById('btnSaveLocal');
+    const btnBackToDashboard = document.getElementById('btnBackToDashboard');
+    const lastSaved = document.getElementById('lastSaved');
+
+    const btnOpenHistory = document.getElementById('btnOpenHistory');
+    const historyModal = document.getElementById('historyModal');
+    const historyList = document.getElementById('historyList');
+    const btnCloseHistory = document.getElementById('btnCloseHistory');
+
+    let currentUser = null;
+    let currentLeitoId = null;
+    let unsubscribeLeitos = null;
+
+    // ====== Auth ======
+    btnRegister.onclick = async () => {
+      authMsg.textContent = '';
+      try{
+        const userCred = await createUserWithEmailAndPassword(auth, emailInput.value, passInput.value);
+        authMsg.textContent = 'Registrado OK — entrando...';
+      }catch(e){ authMsg.textContent = e.message; }
     }
 
-    function adicionarLeito() {
-      const nome = prompt('Digite o nome do leito:');
-      if (nome) {
-        leitos.push(nome);
-        renderizarLeitos();
+    btnLogin.onclick = async () => {
+      authMsg.textContent = '';
+      try{
+        const userCred = await signInWithEmailAndPassword(auth, emailInput.value, passInput.value);
+        authMsg.textContent = 'Entrou!';
+      }catch(e){ authMsg.textContent = e.message; }
+    }
+
+    btnSignOut.onclick = btnSignOut2.onclick = async ()=>{
+      await signOut(auth);
+    }
+
+    onAuthStateChanged(auth, user => {
+      currentUser = user;
+      if(user){
+        authBox.classList.add('hidden');
+        appBox.classList.remove('hidden');
+        userEmail.textContent = user.email;
+        document.getElementById('uidDisplay').textContent = user.uid;
+        btnSignOut.classList.remove('hidden');
+        startLeitosListener();
+      }else{
+        authBox.classList.remove('hidden');
+        appBox.classList.add('hidden');
+        userEmail.textContent = '—';
+        document.getElementById('uidDisplay').textContent = '—';
+        btnSignOut.classList.add('hidden');
+        if(unsubscribeLeitos) unsubscribeLeitos();
       }
-    }
+    });
 
-    function removerLeito(index) {
-      leitos.splice(index, 1);
-      renderizarLeitos();
-    }
-
-    function abrirAvaliacao(leito) {
-      leitoAtual = leito;
-      document.getElementById('dashboard').style.display = 'none';
-      document.getElementById('avaliacao').style.display = 'block';
-      document.getElementById('titulo-leito').innerText = `Avaliação - ${leito}`;
-
-      // Carregar dados salvos
-      db.collection("avaliacoes").doc(leito).get().then(doc => {
-        if (doc.exists) {
-          const dados = doc.data();
-          document.getElementById('airway').value = dados.airway || '';
-          document.getElementById('breathing').value = dados.breathing || '';
-          document.getElementById('circulation').value = dados.circulation || '';
-          document.getElementById('disability').value = dados.disability || '';
-          document.getElementById('exposure').value = dados.exposure || '';
-        }
+    // ====== Leitos (Firestore per-user) ======
+    function startLeitosListener(){
+      const leitosCol = collection(db, 'users', currentUser.uid, 'leitos');
+      // snapshot real-time
+      unsubscribeLeitos = onSnapshot(leitosCol, snapshot => {
+        const items = [];
+        snapshot.forEach(docSnap => items.push({ id: docSnap.id, ...docSnap.data() }));
+        renderLeitos(items);
       });
     }
 
-    function salvarAvaliacao() {
-      const dados = {
-        airway: document.getElementById('airway').value,
-        breathing: document.getElementById('breathing').value,
-        circulation: document.getElementById('circulation').value,
-        disability: document.getElementById('disability').value,
-        exposure: document.getElementById('exposure').value,
-        timestamp: new Date()
+    function renderLeitos(items){
+      leitosList.innerHTML = '';
+      const q = filter.value.trim().toLowerCase();
+      items.filter(it => !q || (it.name && it.name.toLowerCase().includes(q))).forEach(it => {
+        const div = document.createElement('div');
+        div.className = 'leito-item';
+        div.innerHTML = `<div><strong>${it.name}</strong><div class='meta'>ID: ${it.id}</div></div><div style='display:flex;gap:8px'><button class='btn btn-ghost' data-id='${it.id}'>Abrir</button><button class='btn btn-danger' data-del='${it.id}'>Remover</button></div>`;
+        // abrir ao clicar no card
+        div.querySelector('button[data-id]').onclick = ()=> abrirLeito(it.id, it.name);
+        div.querySelector('button[data-del]').onclick = async (e)=>{ e.stopPropagation(); if(confirm('Remover leito?')){ await deleteDoc(doc(db,'users',currentUser.uid,'leitos',it.id)); if(currentLeitoId===it.id) fecharAvaliacao(); }};
+        leitosList.appendChild(div);
+      });
+    }
+
+    btnNewLeito.onclick = async ()=>{
+      const name = prompt('Nome/ID do leito (ex: LEITO_01 - João):');
+      if(!name) return;
+      // cria doc com id auto
+      const ref = await addDoc(collection(db,'users',currentUser.uid,'leitos'), { name, createdAt: serverTimestamp() });
+      // abrir automaticamente
+      abrirLeito(ref.id, name);
+    }
+
+    filter.oninput = ()=>{ /* listener: we rely on realtime snapshot */ }
+
+    // ====== Abrir leito / carregar avaliação ======
+    async function abrirLeito(leitoId, leitoName){
+      currentLeitoId = leitoId;
+      tituloAvaliacao.textContent = `Avaliação — ${leitoName}`;
+      avaliacaoArea.classList.remove('hidden');
+      emptyInfo.classList.add('hidden');
+      btnOpenHistory.classList.remove('hidden');
+
+      // load last saved evaluation
+      const docRef = doc(db,'users',currentUser.uid,'avaliacoes',leitoId);
+      const snap = await getDoc(docRef);
+      if(snap.exists()){
+        const d = snap.data();
+        inputNome.value = d.meta?.nome || leitoName;
+        inputResponsavel.value = d.meta?.responsavel || '';
+        fr.value = d.vitals?.fr || '';
+        spo2.value = d.vitals?.spo2 || '';
+        fc.value = d.vitals?.fc || '';
+        obsA.value = d.A?.obs || '';
+        obsB.value = d.B?.obs || '';
+        obsC.value = d.C?.obs || '';
+        obsD.value = d.D?.obs || '';
+        obsE.value = d.E?.obs || '';
+        lastSaved.textContent = (d.updatedAt && d.updatedAt.toDate) ? d.updatedAt.toDate().toLocaleString() : '—';
+      }else{
+        // limpar campos
+        inputNome.value = leitoName; inputResponsavel.value = ''; fr.value='';spo2.value='';fc.value=''; obsA.value='';obsB.value='';obsC.value='';obsD.value='';obsE.value=''; lastSaved.textContent='—';
+      }
+      // try to restore from local cache if present
+      const cached = localStorage.getItem(`cache_${currentUser.uid}_${currentLeitoId}`);
+      if(cached){ if(confirm('Existe um salvamento local não sincronizado. Restaurar?')){
+        const data = JSON.parse(cached);
+        inputNome.value = data.meta?.nome || inputNome.value;
+        inputResponsavel.value = data.meta?.responsavel || inputResponsavel.value;
+        fr.value = data.vitals?.fr || fr.value;
+        spo2.value = data.vitals?.spo2 || spo2.value;
+        fc.value = data.vitals?.fc || fc.value;
+        obsA.value = data.A?.obs || obsA.value;
+        obsB.value = data.B?.obs || obsB.value;
+        obsC.value = data.C?.obs || obsC.value;
+        obsD.value = data.D?.obs || obsD.value;
+        obsE.value = data.E?.obs || obsE.value;
+      }}
+    }
+
+    function fecharAvaliacao(){ currentLeitoId = null; avaliacaoArea.classList.add('hidden'); emptyInfo.classList.remove('hidden'); btnOpenHistory.classList.add('hidden'); lastSaved.textContent='—'; }
+
+    btnBackToDashboard.onclick = ()=>{ fecharAvaliacao(); }
+
+    // ====== Salvar avaliação ======
+    btnSaveLocal.onclick = ()=>{
+      if(!currentUser || !currentLeitoId) return alert('Abra um leito antes');
+      const payload = makePayload();
+      localStorage.setItem(`cache_${currentUser.uid}_${currentLeitoId}`, JSON.stringify(payload));
+      lastSaved.textContent = new Date().toLocaleString() + ' (local)';
+      alert('Salvo localmente (cache).');
+    }
+
+    btnSave.onclick = async ()=>{
+      if(!currentUser || !currentLeitoId) return alert('Abra um leito antes');
+      const payload = makePayload();
+      // set na coleção de avaliacoes
+      const docRef = doc(db,'users',currentUser.uid,'avaliacoes',currentLeitoId);
+      await setDoc(docRef, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+      // adicionar item ao historico
+      const histRef = collection(db,'users',currentUser.uid,'avaliacoes',currentLeitoId,'historico');
+      await addDoc(histRef, { snapshot: payload, ts: serverTimestamp() });
+      // limpar cache local
+      localStorage.removeItem(`cache_${currentUser.uid}_${currentLeitoId}`);
+      lastSaved.textContent = new Date().toLocaleString();
+      alert('Avaliação salva e historizada no Firebase.');
+    }
+
+    function makePayload(){
+      return {
+        meta: { nome: inputNome.value, responsavel: inputResponsavel.value },
+        vitals: { fr: fr.value, spo2: spo2.value, fc: fc.value },
+        A: { obs: obsA.value }, B: { obs: obsB.value }, C: { obs: obsC.value }, D: { obs: obsD.value }, E: { obs: obsE.value }
       };
-
-      db.collection("avaliacoes").doc(leitoAtual).set(dados)
-        .then(() => alert('Avaliação salva com sucesso!'));
     }
 
-    function voltarDashboard() {
-      document.getElementById('dashboard').style.display = 'block';
-      document.getElementById('avaliacao').style.display = 'none';
+    // ====== Historico ======
+    btnOpenHistory.onclick = async ()=>{
+      if(!currentLeitoId) return;
+      historyList.innerHTML = '';
+      historyModal.classList.remove('hidden');
+      // fetch last 50
+      const histCol = collection(db,'users',currentUser.uid,'avaliacoes',currentLeitoId,'historico');
+      const snaps = await getDocs(query(histCol, orderBy('ts','desc')));
+      snaps.forEach(s=>{
+        const d = s.data();
+        const li = document.createElement('div');
+        li.style.borderBottom='1px solid #f1f5f9'; li.style.padding='8px 6px';
+        const ts = d.ts && d.ts.toDate ? d.ts.toDate().toLocaleString() : '—';
+        li.innerHTML = `<div style='font-size:13px;color:var(--muted)'>${ts}</div><pre style='white-space:pre-wrap;margin:6px 0;font-size:13px'>${JSON.stringify(d.snapshot,null,2)}</pre>`;
+        historyList.appendChild(li);
+      });
     }
+    btnCloseHistory.onclick = ()=> historyModal.classList.add('hidden');
+
+    // ====== small helpers ======
+    function alert(msg){ window.alert(msg); }
+
+    // prevent leaving unsaved
+    window.addEventListener('beforeunload', (e)=>{
+      if(currentLeitoId){
+        const cache = localStorage.getItem(`cache_${currentUser?.uid}_${currentLeitoId}`);
+        if(cache) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      }
+    });
+
   </script>
 </body>
 </html>
