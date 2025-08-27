@@ -2,12 +2,91 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Dashboard - Leitos</title>
-  <script type="module">
-    // Importa Firebase v9 (modular)
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, getDocs, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avaliação do Paciente Crítico</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f6fa;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background-color: #4a69bd;
+      color: white;
+      padding: 15px;
+      text-align: center;
+    }
+    #dashboard, #avaliacao {
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 15px;
+      margin: 10px 0;
+      box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+      cursor: pointer;
+    }
+    button {
+      padding: 10px 15px;
+      margin: 5px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .btn-add { background-color: #4cd137; color: white; }
+    .btn-remove { background-color: #e84118; color: white; }
+    .btn-back { background-color: #718093; color: white; }
+    .btn-save { background-color: #273c75; color: white; }
+    textarea, select, input {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Dashboard - Pacientes Críticos</h2>
+  </header>
 
+  <!-- DASHBOARD -->
+  <div id="dashboard">
+    <button class="btn-add" onclick="adicionarLeito()">Adicionar Leito</button>
+    <div id="lista-leitos"></div>
+  </div>
+
+  <!-- AVALIAÇÃO -->
+  <div id="avaliacao" style="display:none;">
+    <h3 id="titulo-leito"></h3>
+    <form id="form-avaliacao">
+      <label>A - Airway (Via Aérea)</label>
+      <textarea id="airway"></textarea>
+      
+      <label>B - Breathing (Respiração)</label>
+      <textarea id="breathing"></textarea>
+      
+      <label>C - Circulation (Circulação)</label>
+      <textarea id="circulation"></textarea>
+      
+      <label>D - Disability (Neurológico)</label>
+      <textarea id="disability"></textarea>
+      
+      <label>E - Exposure (Exposição)</label>
+      <textarea id="exposure"></textarea>
+
+      <button type="button" class="btn-save" onclick="salvarAvaliacao()">Salvar Avaliação</button>
+      <button type="button" class="btn-back" onclick="voltarDashboard()">Voltar</button>
+    </form>
+  </div>
+
+  <script>
+    // Configuração Firebase
    const firebaseConfig = {
   apiKey: "AIzaSyAh4cDk7h-x0IekJyQEvP4FUbHds6z7Dtc",
   authDomain: "passagem-plantao2025.firebaseapp.com",
@@ -16,58 +95,77 @@
   messagingSenderId: "46390981643",
   appId: "1:46390981643:web:158251408fe14ac4ba030e"
 };
+    const app = firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+    let leitos = [];
+    let leitoAtual = null;
 
-    async function carregarLeitos() {
-      const lista = document.getElementById("listaLeitos");
-      lista.innerHTML = "";
-      const querySnapshot = await getDocs(collection(db, "leitos"));
-      querySnapshot.forEach((docSnap) => {
-        const li = document.createElement("li");
-        li.textContent = docSnap.id;
-        li.onclick = () => {
-          localStorage.setItem("leitoAtual", docSnap.id);
-          window.location.href = "avaliacao.html";
-        };
-        const btn = document.createElement("button");
-        btn.textContent = "Remover";
-        btn.onclick = async (e) => {
-          e.stopPropagation();
-          await deleteDoc(doc(db, "leitos", docSnap.id));
-          carregarLeitos();
-        };
-        li.appendChild(btn);
-        lista.appendChild(li);
+    function renderizarLeitos() {
+      const lista = document.getElementById('lista-leitos');
+      lista.innerHTML = '';
+      leitos.forEach((leito, i) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <strong>${leito}</strong>
+          <button class='btn-remove' onclick='removerLeito(${i})'>Remover</button>
+        `;
+        card.onclick = () => abrirAvaliacao(leito);
+        lista.appendChild(card);
       });
     }
 
-    async function adicionarLeito() {
-      const nome = prompt("Digite o nome/ID do leito:");
+    function adicionarLeito() {
+      const nome = prompt('Digite o nome do leito:');
       if (nome) {
-        await addDoc(collection(db, "leitos"), { nome: nome, avaliacao: {} });
-        carregarLeitos();
+        leitos.push(nome);
+        renderizarLeitos();
       }
     }
 
-    window.onload = () => {
-      carregarLeitos();
-      document.getElementById("addLeito").onclick = adicionarLeito;
-    };
+    function removerLeito(index) {
+      leitos.splice(index, 1);
+      renderizarLeitos();
+    }
+
+    function abrirAvaliacao(leito) {
+      leitoAtual = leito;
+      document.getElementById('dashboard').style.display = 'none';
+      document.getElementById('avaliacao').style.display = 'block';
+      document.getElementById('titulo-leito').innerText = `Avaliação - ${leito}`;
+
+      // Carregar dados salvos
+      db.collection("avaliacoes").doc(leito).get().then(doc => {
+        if (doc.exists) {
+          const dados = doc.data();
+          document.getElementById('airway').value = dados.airway || '';
+          document.getElementById('breathing').value = dados.breathing || '';
+          document.getElementById('circulation').value = dados.circulation || '';
+          document.getElementById('disability').value = dados.disability || '';
+          document.getElementById('exposure').value = dados.exposure || '';
+        }
+      });
+    }
+
+    function salvarAvaliacao() {
+      const dados = {
+        airway: document.getElementById('airway').value,
+        breathing: document.getElementById('breathing').value,
+        circulation: document.getElementById('circulation').value,
+        disability: document.getElementById('disability').value,
+        exposure: document.getElementById('exposure').value,
+        timestamp: new Date()
+      };
+
+      db.collection("avaliacoes").doc(leitoAtual).set(dados)
+        .then(() => alert('Avaliação salva com sucesso!'));
+    }
+
+    function voltarDashboard() {
+      document.getElementById('dashboard').style.display = 'block';
+      document.getElementById('avaliacao').style.display = 'none';
+    }
   </script>
-  <style>
-    body { font-family: Arial, sans-serif; background:#f0f4f8; margin:0; padding:20px; color:#222; }
-    h1 { margin-bottom:20px; }
-    ul { list-style:none; padding:0; }
-    li { background:#fff; padding:10px; margin-bottom:8px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 6px rgba(0,0,0,0.1); cursor:pointer; }
-    li button { background:#e11d48; color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; }
-    #addLeito { background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
-  </style>
-</head>
-<body>
-  <h1>Dashboard - Leitos</h1>
-  <button id="addLeito">➕ Adicionar Leito</button>
-  <ul id="listaLeitos"></ul>
 </body>
 </html>
