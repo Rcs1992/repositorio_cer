@@ -1,19 +1,3 @@
-<!--
-Versão do USUÁRIO — Repositório de Documentos (diagnóstico de raw + fallback robusto)
-
-Atualização importante aplicada:
-- Agora, ao carregar a lista, o script testa se o `download_url` (raw) de cada arquivo está acessível (HEAD request). Isso permite identificar quais arquivos retornam 404/403 (possível Git LFS ou problema no raw).
-- A tabela mostra um **badge** indicando se o raw está acessível (✔️) ou se há problema (⚠️ - usar fallback). Para arquivos com problema, o botão Visualizar abre a página do GitHub (`html_url`) diretamente, evitando erro 404.
-- A função de preview tenta exibir PDFs/ imagens/ textos via blob. Se o raw falhar, faz fallback automático para a página do GitHub.
-
-Observações técnicas:
-- Testes HEAD podem ser bloqueados por CORS em alguns casos; quando o HEAD falhar, tentamos um GET leve como second check.
-- Se muitos arquivos forem testados, a API do GitHub pode aplicar rate limits — isso é raro para pequenas listas, mas cuidado em repositórios com centenas de arquivos.
-- Se os arquivos estiverem no Git LFS, o raw frequentemente não estará disponível: o GitHub serve um ponteiro em vez do conteúdo bruto. Nesse caso reenvie sem LFS ou hospede os PDFs em storage alternativo.
-
-Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
--->
-
 <!doctype html>
 <html lang="pt-BR">
 <head>
@@ -33,7 +17,7 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
     }
 
     *{box-sizing:border-box}
-    body{font-family:Inter, Arial, sans-serif; background:var(--bg); color:var(--dark); margin:0; padding:28px}
+    body{font-family:Inter, Arial, sans-serif; background:var(--bg); color:var(--dark); margin:0; padding:20px}
     a{color:var(--accent)}
 
     .wrap{max-width:980px;margin:0 auto}
@@ -45,13 +29,14 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
 
     .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .search{flex:1;min-width:220px}
-    input[type=search]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(2,59,107,0.08);font-size:15px;background:transparent;color:var(--dark)}
+    input[type=search]{width:100%;padding:12px 14px;border-radius:10px;border:1px solid rgba(2,59,107,0.08);font-size:15px;background:transparent;color:var(--dark)}
     input[type=search]::placeholder{color:rgba(2,59,107,0.35)}
 
     .filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
-    .filter-item{display:flex;align-items:center;gap:6px;background:rgba(0,193,246,0.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(0,193,246,0.12);font-size:13px;color:var(--dark)}
-    .filter-item input{transform:scale(1.1);margin:0}
+    .filter-item{display:flex;align-items:center;gap:8px;background:rgba(0,193,246,0.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(0,193,246,0.12);font-size:13px;color:var(--dark)}
+    .filter-item input{transform:scale(1.05);margin:0}
 
+    /* Table for desktop */
     table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:12px;text-align:left;border-bottom:1px solid rgba(2,59,107,0.06)}
     th{color:var(--muted);font-size:13px}
@@ -62,25 +47,40 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
     .btn{display:inline-block;padding:8px 12px;border-radius:10px;text-decoration:none;border:1px solid rgba(0,0,0,0.04);background:transparent;color:var(--accent);font-weight:600;cursor:pointer}
     .btn-primary{background:var(--accent);color:#023b6b;border:0}
 
-    .actions{display:flex;gap:8px}
+    .actions{display:flex;gap:8px;align-items:center}
 
     .badge-ok{color:var(--ok);font-weight:700;margin-right:8px}
     .badge-warn{color:var(--warn);font-weight:700;margin-right:8px}
 
-    .modal-backdrop{position:fixed;inset:0;background:rgba(2,59,107,0.28);display:none;align-items:center;justify-content:center;padding:20px;z-index:999}
-    .modal{background:var(--card);border-radius:10px;max-width:980px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 16px 48px rgba(2,59,107,0.16);border:1px solid rgba(2,59,107,0.06)}
-    .modal header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(2,59,107,0.04)}
-    .modal .body{padding:14px}
-    .modal iframe{width:100%;height:70vh;border:0;border-radius:6px}
-    .modal img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:6px}
-    pre.txtview{white-space:pre-wrap;word-wrap:break-word;background:#fbfeff;padding:12px;border-radius:8px;border:1px solid rgba(2,59,107,0.03)}
-    .close-btn{background:transparent;border:1px solid rgba(2,59,107,0.06);color:var(--dark);border-radius:8px;padding:8px 10px;cursor:pointer}
+    /* Mobile card list */
+    .file-card{display:none;border-radius:10px;padding:12px;margin-top:10px;border:1px solid var(--border);background:linear-gradient(180deg,#fff,#fffcfa);box-shadow:0 8px 20px rgba(2,59,107,0.03)}
+    .file-card .meta{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .file-card .name{font-weight:700;color:var(--dark);margin-bottom:6px}
+    .file-card .sub{color:var(--muted);font-size:13px}
+    .download-btn{display:inline-block;padding:10px 12px;border-radius:10px;text-decoration:none;background:var(--accent);color:#023b6b;font-weight:700;border:0;cursor:pointer}
+    .download-btn.full{width:100%;text-align:center}
 
     .notice{margin-top:12px;padding:10px;border-radius:8px;background:linear-gradient(180deg,#ffffff,#fffcfa);color:var(--dark);border:1px solid rgba(2,59,107,0.03)}
 
+    @media (max-width:900px){
+      body{padding:16px}
+      .wrap{padding:0 6px}
+    }
+
     @media (max-width:720px){
-      th,td{padding:10px}
-      .modal iframe{height:60vh}
+      /* hide desktop table and show cards */
+      table{display:none}
+      .file-card{display:block}
+      .filters{gap:6px}
+      .filter-item{font-size:12px;padding:6px 8px}
+      input[type=search]{padding:10px}
+      .download-btn{padding:12px}
+    }
+
+    /* small visual tweaks for very small devices */
+    @media (max-width:360px){
+      h1{font-size:18px}
+      input[type=search]{font-size:14px}
     }
   </style>
 </head>
@@ -89,7 +89,7 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
     <header>
       <h1 style="color:var(--dark)">Repositório de Documentos</h1>
     </header>
-    <p class="lead">Pesquise e acesse documentos disponibilizados pelo administrador. Você pode visualizar diretamente (PDF/imagem/texto) ou baixar. O sistema agora indica se o arquivo raw está acessível (✔️) ou se há problema (⚠️).</p>
+    <p class="lead">Pesquise e acesse documentos disponibilizados pelo administrador. O sistema indica se o arquivo raw está acessível (✔️) ou se há problema (⚠️).</p>
 
     <div class="card">
       <div class="controls">
@@ -112,22 +112,6 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
     </div>
   </div>
 
-  <!-- Modal de visualização -->
-  <div id="modal" class="modal-backdrop" role="dialog" aria-hidden="true">
-    <div class="modal" role="document">
-      <header>
-        <div id="modalTitle" style="font-weight:700;color:var(--dark)">Visualizando</div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <a id="modalDownload" class="btn" href="#" target="_blank" rel="noopener">Baixar</a>
-          <button id="closeModal" class="close-btn">Fechar</button>
-        </div>
-      </header>
-      <div class="body" id="modalBody">
-        <!-- conteúdo injetado -->
-      </div>
-    </div>
-  </div>
-
   <script>
     // === CONFIGURE AQUI: substitua pelos valores do seu repositório público ===
     const OWNER = 'Rcs1992'    // ex: rodrigoc2santos
@@ -135,7 +119,6 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
     const PATH  = 'documents'         // pasta onde os arquivos ficam no repositório
     // ========================================================================
 
-    // Categorias e palavras-chaves para detecção automática
     const CATEGORIES = [
       { key:'pops', label:'POPs', keywords:['pop','pops'] },
       { key:'fluxos', label:'Fluxos', keywords:['fluxo','fluxos'] },
@@ -155,8 +138,6 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
       searchInput.addEventListener('input', () => renderList(files))
       loadFiles()
       searchInput.addEventListener('keydown', e => { if(e.key === 'Escape') { searchInput.value=''; renderList(files) } })
-      document.getElementById('closeModal').addEventListener('click', closeModal)
-      document.getElementById('modal').addEventListener('click', (e) => { if(e.target.id === 'modal') closeModal() })
     })
 
     async function loadFiles(){
@@ -167,16 +148,12 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
         const res = await fetch(url)
         if(!res.ok){ resultsArea.innerHTML = `<div class="muted">Erro ao acessar repositório (status ${res.status}). Confirme as configurações e se o repo é público.</div>`; return }
         const data = await res.json()
-        // mapear download_url e html_url (html_url direciona para a página do GitHub do arquivo)
         files = data.filter(i => i.type === 'file').map(f => ({ name: f.name, size: f.size, download_url: f.download_url, html_url: f.html_url }))
 
-        // detectar categoria para cada arquivo
         files.forEach(f => f.category = detectCategory(f.name))
 
-        // checar disponibilidade do download_url para cada arquivo (HEAD -> GET fallback)
         await Promise.all(files.map(f => checkRawAvailability(f)))
 
-        // montar filtros automaticamente (usamos categorias pre-definidas + outros)
         buildFilters()
         renderList(files)
       }catch(err){
@@ -184,27 +161,23 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
       }
     }
 
-    // testa se o download_url responde OK
     async function checkRawAvailability(file){
       file.rawAccessible = false
       if(!file.download_url) return
       try{
-        // primeiro tenta HEAD
         const controller = new AbortController(); const timeout = setTimeout(()=>controller.abort(), 6000)
         let res = await fetch(file.download_url, { method:'HEAD', signal: controller.signal })
         clearTimeout(timeout)
         if(res && res.ok){ file.rawAccessible = true; return }
-      }catch(e){ /* ignora */ }
+      }catch(e){ }
 
-      // HEAD pode falhar por CORS; tenta GET com pequeno range como alternativa
       try{
         const controller2 = new AbortController(); const timeout2 = setTimeout(()=>controller2.abort(), 6000)
         const res2 = await fetch(file.download_url, { method:'GET', headers:{ 'Range':'bytes=0-1023' }, signal: controller2.signal })
         clearTimeout(timeout2)
         if(res2 && (res2.status === 200 || res2.status === 206)) { file.rawAccessible = true; return }
-      }catch(e){ /* ignora */ }
+      }catch(e){ }
 
-      // se chegou aqui, raw não acessível
       file.rawAccessible = false
     }
 
@@ -219,7 +192,6 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
     function buildFilters(){
       filtersEl.innerHTML = ''
       activeFilters = new Set()
-      // adicionar categorias pre-definidas
       CATEGORIES.forEach(c => {
         const checked = true
         activeFilters.add(c.key)
@@ -228,13 +200,11 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
         div.innerHTML = `<input type="checkbox" data-key="${c.key}" ${checked? 'checked':''}> ${c.label}`
         filtersEl.appendChild(div)
       })
-      // adicionar 'Outros'
       const divo = document.createElement('label')
       divo.className = 'filter-item'
       divo.innerHTML = `<input type="checkbox" data-key="outros" checked> Outros`
       filtersEl.appendChild(divo)
 
-      // listeners
       filtersEl.querySelectorAll('input[type=checkbox]').forEach(chk => chk.addEventListener('change', (e)=>{
         const key = chk.getAttribute('data-key')
         if(chk.checked) activeFilters.add(key); else activeFilters.delete(key)
@@ -252,84 +222,35 @@ Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
       countEl.textContent = filtered.length
       if(filtered.length === 0){ resultsArea.innerHTML = '<div class="muted">Nenhum arquivo encontrado.</div>'; return }
 
+      // Desktop table
       let html = '<table><thead><tr><th>Nome</th><th class="right">Tamanho</th><th>Ações</th></tr></thead><tbody>'
       filtered.forEach(f => {
         const kb = Math.round((f.size||0)/10.24)/100
         const badge = f.rawAccessible ? '<span class="badge-ok">✔️</span>' : '<span class="badge-warn">⚠️</span>'
-        // data-html é a página do GitHub (fallback), data-download é o link raw/download
-        html += `<tr><td class="small">${badge}${escapeHtml(f.name)}</td><td class="right small">${kb} KB</td><td class="small"><div class="actions"><button style=\"background:transparent;border:1px solid rgba(2,59,107,0.06);border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--dark);\" data-download=\"${encodeURI(f.download_url||'')}\" data-html=\"${encodeURI(f.html_url||'')}\" data-name=\"${escapeHtmlAttr(f.name)}\" class=\"viewBtn\">Visualizar</button><a class=\"btn\" href=\"${encodeURI(f.rawAccessible?f.download_url:f.html_url||f.download_url)}\" target=\"_blank\" rel=\"noopener\">Baixar</a></div></td></tr>`
+        const downloadHref = encodeURI(f.rawAccessible?f.download_url:f.html_url||f.download_url||'#')
+        html += `<tr><td class="small">${badge}${escapeHtml(f.name)}</td><td class="right small">${kb} KB</td><td class="small"><div class="actions"><a class="btn" href="${downloadHref}" target="_blank" rel="noopener">Baixar</a></div></td></tr>`
       })
       html += '</tbody></table>'
+
+      // Mobile cards
+      filtered.forEach(f => {
+        const kb = Math.round((f.size||0)/10.24)/100
+        const badge = f.rawAccessible ? '<span class="badge-ok">✔️</span>' : '<span class="badge-warn">⚠️</span>'
+        const downloadHref = encodeURI(f.rawAccessible?f.download_url:f.html_url||f.download_url||'#')
+        html += `<div class="file-card" role="group" aria-label="Arquivo ${escapeHtmlAttr(f.name)}">
+                  <div class="meta">
+                    <div style="flex:1">
+                      <div class="name">${badge}${escapeHtml(f.name)}</div>
+                      <div class="sub">${kb} KB</div>
+                    </div>
+                    <div style="margin-left:10px">
+                      <a class="download-btn full" href="${downloadHref}" target="_blank" rel="noopener">Baixar</a>
+                    </div>
+                  </div>
+                </div>`
+      })
+
       resultsArea.innerHTML = html
-
-      document.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', (e)=>{
-        const downloadUrl = decodeURI(btn.getAttribute('data-download'))
-        const htmlUrl = decodeURI(btn.getAttribute('data-html'))
-        const name = btn.getAttribute('data-name')
-        openPreviewWithFallback(downloadUrl, htmlUrl, name)
-      }))
-    }
-
-    function getExtension(name){ const parts = name.split('.') ; if(parts.length < 2) return '' ; return parts.pop().toLowerCase() }
-
-    async function openPreviewWithFallback(downloadUrl, htmlUrl, name){
-      const ext = getExtension(name)
-      const modal = document.getElementById('modal')
-      const modalBody = document.getElementById('modalBody')
-      const modalTitle = document.getElementById('modalTitle')
-      const modalDownload = document.getElementById('modalDownload')
-
-      modalTitle.textContent = name
-      modalDownload.href = downloadUrl || htmlUrl || '#'
-
-      const images = ['png','jpg','jpeg','gif','bmp','webp']
-      const textTypes = ['txt','md','csv','log','json']
-
-      modalBody.innerHTML = '<div class="muted">Carregando visualização...</div>'
-      modal.style.display = 'flex'
-      modal.setAttribute('aria-hidden','false')
-
-      if(modal.dataset.blobUrl){ try{ URL.revokeObjectURL(modal.dataset.blobUrl) }catch(e){} delete modal.dataset.blobUrl }
-
-      try{
-        if(ext === 'pdf'){
-          if(!downloadUrl){ window.open(htmlUrl, '_blank', 'noopener'); closeModal(); return }
-
-          // tenta buscar raw como blob
-          const res = await fetch(downloadUrl)
-          if(res.ok){
-            const blob = await res.blob()
-            const blobUrl = URL.createObjectURL(blob)
-            modalBody.innerHTML = `<iframe src="${blobUrl}"></iframe>`
-            modal.dataset.blobUrl = blobUrl
-            return
-          }
-
-          // fallback: abrir página do GitHub
-          window.open(htmlUrl, '_blank', 'noopener')
-          closeModal()
-          return
-
-        }else if(images.includes(ext)){
-          modalBody.innerHTML = `<img src="${downloadUrl||htmlUrl}" alt="${escapeHtml(name)}">`
-        }else if(textTypes.includes(ext)){
-          const res = await fetch(downloadUrl||htmlUrl)
-          if(res.ok){ const txt = await res.text(); modalBody.innerHTML = `<pre class=\"txtview\">${escapeHtml(txt)}</pre>` } else { window.open(htmlUrl, '_blank', 'noopener'); closeModal() }
-        }else{
-          modalBody.innerHTML = '<div class="muted">Pré-visualização não disponível para este tipo de arquivo. Use o botão Baixar.</div>'
-        }
-      }catch(err){
-        try{ window.open(htmlUrl, '_blank', 'noopener') }catch(e){}
-        closeModal()
-      }
-    }
-
-    function closeModal(){
-      const modal = document.getElementById('modal')
-      if(modal.dataset.blobUrl){ try{ URL.revokeObjectURL(modal.dataset.blobUrl) }catch(e){} delete modal.dataset.blobUrl }
-      modal.style.display = 'none'
-      modal.setAttribute('aria-hidden','true')
-      document.getElementById('modalBody').innerHTML = ''
     }
 
     function escapeHtml(s){ if(!s) return '' ; return String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c])) }
