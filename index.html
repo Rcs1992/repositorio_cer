@@ -1,24 +1,29 @@
 <!--
-Versão do USUÁRIO — Repositório de Documentos (apenas visualização, busca, visualização prévia e download)
+Versão do USUÁRIO — Repositório de Documentos (visualização, busca, filtros e download)
 
 Paleta de cores aplicada conforme solicitado:
 - Primária (detalhes/ações): #00c1f6
 - Fundo suave: #fffcfa
 - Texto / título / ênfase escura: #023b6b
 
-Descrição:
-- Página estática pensada apenas para os usuários que verão a lista de documentos, poderão pesquisar por nome,
-  visualizar (quando possível) ou baixar cada arquivo.
-- O upload/cadastro dos documentos é feito pelo administrador diretamente no GitHub (UI). Essa parte não aparece aqui.
+O que foi adicionado nesta versão:
+- Visualização de PDFs implementada via fetch + Blob -> iframe (melhora compatibilidade quando a exibição direta falha);
+- Sistema de filtros por tipo de documento (POPs, Fluxos, Documentos Institucionais, Formulários e Outros). A categoria é detectada automaticamente pelo nome do arquivo (palavras-chaves). Você pode marcar/desmarcar as categorias para filtrar a lista;
+- Mantive a pesquisa por nome e os botões de visualizar/baixar.
+
+Como funciona o filtro (detecção automática):
+- Se o nome do arquivo contiver palavras como "pop" ou "pops" será classificado como POPs.
+- "fluxo" ou "fluxos" → Fluxos.
+- "form" ou "formulario" → Formulários.
+- "institucional" ou "documento" → Documentos Institucionais.
+- Caso não encontre correspondência, o arquivo entra em "Outros".
 
 Instruções rápidas de uso:
-1) Edite as constantes OWNER, REPO e PATH dentro do arquivo (no topo do script) com os valores do seu repositório público do GitHub.
-2) Publique o arquivo em GitHub Pages ou abra localmente no navegador.
-3) A página listará arquivos da pasta configurada e permitirá pesquisar, visualizar (PDF/imagem/texto) e baixar.
+1) Preencha OWNER e REPO no topo do script com os dados do seu repositório público e confirme PATH (ex.: documents).
+2) Publique no GitHub Pages ou abra localmente.
+3) A página carregará os arquivos, você poderá filtrar por categoria e pesquisar por nome.
 
-Observações:
-- O repositório precisa ser público para que a listagem funcione sem autenticação.
-- Tipos com visualização suportada: PDF, PNG, JPG, JPEG, GIF, TXT, MD, CSV. Para outros tipos aparece apenas o link de download.
+OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, eu posso ajustar as palavras-chave para combinar com o padrão dos seus arquivos.
 -->
 
 <!doctype html>
@@ -37,7 +42,6 @@ Observações:
       --border: rgba(2,59,107,0.06);
     }
 
-    /* Reset / base */
     *{box-sizing:border-box}
     body{font-family:Inter, Arial, sans-serif; background:var(--bg); color:var(--dark); margin:0; padding:28px}
     a{color:var(--accent)}
@@ -49,10 +53,14 @@ Observações:
 
     .card{background:var(--card);border-radius:10px;padding:16px;box-shadow:0 6px 20px rgba(2,59,107,0.04);margin-top:18px;border:1px solid var(--border)}
 
-    .controls{display:flex;gap:12px;align-items:center}
-    .search{flex:1}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .search{flex:1;min-width:220px}
     input[type=search]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(2,59,107,0.08);font-size:15px;background:transparent;color:var(--dark)}
     input[type=search]::placeholder{color:rgba(2,59,107,0.35)}
+
+    .filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+    .filter-item{display:flex;align-items:center;gap:6px;background:rgba(0,193,246,0.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(0,193,246,0.12);font-size:13px;color:var(--dark)}
+    .filter-item input{transform:scale(1.1);margin:0}
 
     table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:12px;text-align:left;border-bottom:1px solid rgba(2,59,107,0.06)}
@@ -61,13 +69,11 @@ Observações:
     .small{font-size:13px}
     .right{text-align:right}
 
-    /* Buttons */
     .btn{display:inline-block;padding:8px 12px;border-radius:10px;text-decoration:none;border:1px solid rgba(0,0,0,0.04);background:transparent;color:var(--accent);font-weight:600;cursor:pointer}
     .btn-primary{background:var(--accent);color:#023b6b;border:0}
 
     .actions{display:flex;gap:8px}
 
-    /* modal */
     .modal-backdrop{position:fixed;inset:0;background:rgba(2,59,107,0.28);display:none;align-items:center;justify-content:center;padding:20px;z-index:999}
     .modal{background:var(--card);border-radius:10px;max-width:980px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 16px 48px rgba(2,59,107,0.16);border:1px solid rgba(2,59,107,0.06)}
     .modal header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(2,59,107,0.04)}
@@ -79,7 +85,6 @@ Observações:
 
     .notice{margin-top:12px;padding:10px;border-radius:8px;background:linear-gradient(180deg,#ffffff,#fffcfa);color:var(--dark);border:1px solid rgba(2,59,107,0.03)}
 
-    /* minimal responsive */
     @media (max-width:720px){
       th,td{padding:10px}
       .modal iframe{height:60vh}
@@ -91,7 +96,7 @@ Observações:
     <header>
       <h1 style="color:var(--dark)">Repositório de Documentos</h1>
     </header>
-    <p class="lead">Pesquise e acesse documentos disponibilizados pelo administrador. Você pode visualizar diretamente (quando suportado) ou baixar.</p>
+    <p class="lead">Pesquise e acesse documentos disponibilizados pelo administrador. Você pode visualizar diretamente (PDF/imagem/texto) ou baixar.</p>
 
     <div class="card">
       <div class="controls">
@@ -99,11 +104,14 @@ Observações:
           <label class="small muted">Pesquisar</label>
           <input id="search" type="search" placeholder="Digite parte do nome do documento...">
         </div>
+
         <div style="min-width:150px;text-align:right">
           <label class="small muted">Arquivos</label>
           <div id="count" class="small">—</div>
         </div>
       </div>
+
+      <div id="filters" class="filters" aria-label="Filtros de categoria"></div>
 
       <div id="resultsArea" style="margin-top:12px"></div>
 
@@ -130,15 +138,25 @@ Observações:
   <script>
     // === CONFIGURE AQUI: substitua pelos valores do seu repositório público ===
     const OWNER = 'Rcs1992'    // ex: rodrigoc2santos
-    const REPO  = 'repositorio_cer'     // ex: meus-documentos
-    const PATH  = 'documents'         // pasta onde os arquivos ficam no repositório
+    const REPO  = 'SEU_REPO_AQUI'     // ex: meus-documentos
+    const PATH  = 'repositorio_cer'         // pasta onde os arquivos ficam no repositório
     // ========================================================================
+
+    // Categorias e palavras-chaves para detecção automática
+    const CATEGORIES = [
+      { key:'pops', label:'POPs', keywords:['pop','pops'] },
+      { key:'fluxos', label:'Fluxos', keywords:['fluxo','fluxos'] },
+      { key:'institucional', label:'Documentos Institucionais', keywords:['institucional','documento institucional','documentos institucionais','institucional','documento'] },
+      { key:'formularios', label:'Formulários', keywords:['form','formulario','formulário','formularios','formulários'] }
+    ]
 
     const searchInput = document.getElementById('search')
     const resultsArea = document.getElementById('resultsArea')
     const countEl = document.getElementById('count')
+    const filtersEl = document.getElementById('filters')
 
     let files = []
+    let activeFilters = new Set()
 
     document.addEventListener('DOMContentLoaded', () => {
       searchInput.addEventListener('input', () => renderList(files))
@@ -157,15 +175,59 @@ Observações:
         if(!res.ok){ resultsArea.innerHTML = `<div class="muted">Erro ao acessar repositório (status ${res.status}). Confirme as configurações e se o repo é público.</div>`; return }
         const data = await res.json()
         files = data.filter(i => i.type === 'file').map(f => ({ name: f.name, size: f.size, download_url: f.download_url }))
+
+        // detectar categoria para cada arquivo
+        files.forEach(f => f.category = detectCategory(f.name))
+
+        // montar filtros automaticamente (usamos categorias pre-definidas + outros)
+        buildFilters()
         renderList(files)
       }catch(err){
         resultsArea.innerHTML = '<div class="muted">Erro ao acessar API: '+ err.message +'</div>'
       }
     }
 
+    function detectCategory(name){
+      const n = (name||'').toLowerCase()
+      for(const c of CATEGORIES){
+        for(const kw of c.keywords){ if(n.includes(kw)) return c.key }
+      }
+      return 'outros'
+    }
+
+    function buildFilters(){
+      filtersEl.innerHTML = ''
+      activeFilters = new Set()
+      // adicionar categorias pre-definidas
+      CATEGORIES.forEach(c => {
+        const checked = true
+        activeFilters.add(c.key)
+        const div = document.createElement('label')
+        div.className = 'filter-item'
+        div.innerHTML = `<input type=\"checkbox\" data-key=\"${c.key}\" ${checked? 'checked':''}> ${c.label}`
+        filtersEl.appendChild(div)
+      })
+      // adicionar 'Outros'
+      const divo = document.createElement('label')
+      divo.className = 'filter-item'
+      divo.innerHTML = `<input type=\"checkbox\" data-key=\"outros\" checked> Outros`
+      filtersEl.appendChild(divo)
+
+      // listeners
+      filtersEl.querySelectorAll('input[type=checkbox]').forEach(chk => chk.addEventListener('change', (e)=>{
+        const key = chk.getAttribute('data-key')
+        if(chk.checked) activeFilters.add(key); else activeFilters.delete(key)
+        renderList(files)
+      }))
+    }
+
     function renderList(list){
       const q = (searchInput.value || '').trim().toLowerCase()
-      const filtered = list.filter(f => f.name.toLowerCase().includes(q))
+      const filtered = list.filter(f => {
+        const matchesQuery = f.name.toLowerCase().includes(q)
+        const matchesFilter = activeFilters.size === 0 ? true : activeFilters.has(f.category)
+        return matchesQuery && matchesFilter
+      })
       countEl.textContent = filtered.length
       if(filtered.length === 0){ resultsArea.innerHTML = '<div class="muted">Nenhum arquivo encontrado.</div>'; return }
 
@@ -184,11 +246,7 @@ Observações:
       }))
     }
 
-    function getExtension(name){
-      const parts = name.split('.')
-      if(parts.length < 2) return ''
-      return parts.pop().toLowerCase()
-    }
+    function getExtension(name){ const parts = name.split('.') ; if(parts.length < 2) return '' ; return parts.pop().toLowerCase() }
 
     async function openPreview(url, name){
       const ext = getExtension(name)
@@ -206,9 +264,21 @@ Observações:
       modal.style.display = 'flex'
       modal.setAttribute('aria-hidden','false')
 
+      // limpar blob anterior se houver
+      if(modal.dataset.blobUrl){ try{ URL.revokeObjectURL(modal.dataset.blobUrl) }catch(e){} delete modal.dataset.blobUrl }
+
       try{
         if(ext === 'pdf'){
-          modalBody.innerHTML = `<iframe src="${url}" sandbox="allow-same-origin allow-forms allow-scripts"></iframe>`
+          // buscar como blob e criar URL para evitar problemas de CORS/X-Frame
+          const res = await fetch(url)
+          if(res.ok){
+            const blob = await res.blob()
+            const blobUrl = URL.createObjectURL(blob)
+            modalBody.innerHTML = `<iframe src="${blobUrl}"></iframe>`
+            modal.dataset.blobUrl = blobUrl
+          }else{
+            modalBody.innerHTML = '<div class="muted">Não foi possível carregar a visualização. Abra em nova aba para baixar.</div>'
+          }
         }else if(images.includes(ext)){
           modalBody.innerHTML = `<img src="${url}" alt="${escapeHtml(name)}">`
         }else if(textTypes.includes(ext)){
@@ -225,6 +295,7 @@ Observações:
 
     function closeModal(){
       const modal = document.getElementById('modal')
+      if(modal.dataset.blobUrl){ try{ URL.revokeObjectURL(modal.dataset.blobUrl) }catch(e){} delete modal.dataset.blobUrl }
       modal.style.display = 'none'
       modal.setAttribute('aria-hidden','true')
       document.getElementById('modalBody').innerHTML = ''
