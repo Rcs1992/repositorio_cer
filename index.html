@@ -1,16 +1,29 @@
 <!--
-Versão do USUÁRIO — Repositório de Documentos (preview com fallback robusto)
+Versão do USUÁRIO — Repositório de Documentos (visualização, busca, filtros e download)
 
-Atualização: implementado fallback ao tentar visualizar PDFs que retornam 404 no `download_url`.
-- Primeiro tentamos `download_url` (raw). Se o fetch falhar (404, CORS, etc.) abrimos a página do GitHub (`html_url`) em nova aba para permitir download/visualização pelo próprio GitHub.
-- Também incluímos `html_url` no mapeamento dos arquivos e colocamos o link como fallback do botão "Baixar".
-
-Paleta de cores:
+Paleta de cores aplicada conforme solicitado:
 - Primária (detalhes/ações): #00c1f6
 - Fundo suave: #fffcfa
-- Texto / ênfase escura: #023b6b
+- Texto / título / ênfase escura: #023b6b
 
-Filtros por categoria: POPs, Fluxos, Documentos Institucionais, Formulários, Outros (detecção por palavras-chave no nome do arquivo).
+O que foi adicionado nesta versão:
+- Visualização de PDFs implementada via fetch + Blob -> iframe (melhora compatibilidade quando a exibição direta falha);
+- Sistema de filtros por tipo de documento (POPs, Fluxos, Documentos Institucionais, Formulários e Outros). A categoria é detectada automaticamente pelo nome do arquivo (palavras-chaves). Você pode marcar/desmarcar as categorias para filtrar a lista;
+- Mantive a pesquisa por nome e os botões de visualizar/baixar.
+
+Como funciona o filtro (detecção automática):
+- Se o nome do arquivo contiver palavras como "pop" ou "pops" será classificado como POPs.
+- "fluxo" ou "fluxos" → Fluxos.
+- "form" ou "formulario" → Formulários.
+- "institucional" ou "documento" → Documentos Institucionais.
+- Caso não encontre correspondência, o arquivo entra em "Outros".
+
+Instruções rápidas de uso:
+1) Preencha OWNER e REPO no topo do script com os dados do seu repositório público e confirme PATH (ex.: documents).
+2) Publique no GitHub Pages ou abra localmente.
+3) A página carregará os arquivos, você poderá filtrar por categoria e pesquisar por nome.
+
+OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, eu posso ajustar as palavras-chave para combinar com o padrão dos seus arquivos.
 -->
 
 <!doctype html>
@@ -124,8 +137,8 @@ Filtros por categoria: POPs, Fluxos, Documentos Institucionais, Formulários, Ou
 
   <script>
     // === CONFIGURE AQUI: substitua pelos valores do seu repositório público ===
-    const OWNER = 'Rcs1992'    // ex: rodrigoc2santos
-    const REPO  = 'repositorio_cer'     // ex: meus-documentos
+    const OWNER = 'SEU_OWNER_AQUI'    // ex: rodrigoc2santos
+    const REPO  = 'SEU_REPO_AQUI'     // ex: meus-documentos
     const PATH  = 'documents'         // pasta onde os arquivos ficam no repositório
     // ========================================================================
 
@@ -161,8 +174,7 @@ Filtros por categoria: POPs, Fluxos, Documentos Institucionais, Formulários, Ou
         const res = await fetch(url)
         if(!res.ok){ resultsArea.innerHTML = `<div class="muted">Erro ao acessar repositório (status ${res.status}). Confirme as configurações e se o repo é público.</div>`; return }
         const data = await res.json()
-        // mapear download_url e html_url (html_url direciona para a página do GitHub do arquivo)
-        files = data.filter(i => i.type === 'file').map(f => ({ name: f.name, size: f.size, download_url: f.download_url, html_url: f.html_url }))
+        files = data.filter(i => i.type === 'file').map(f => ({ name: f.name, size: f.size, download_url: f.download_url }))
 
         // detectar categoria para cada arquivo
         files.forEach(f => f.category = detectCategory(f.name))
@@ -222,33 +234,28 @@ Filtros por categoria: POPs, Fluxos, Documentos Institucionais, Formulários, Ou
       let html = '<table><thead><tr><th>Nome</th><th class="right">Tamanho</th><th>Ações</th></tr></thead><tbody>'
       filtered.forEach(f => {
         const kb = Math.round((f.size||0)/10.24)/100
-        // data-html é a página do GitHub (fallback), data-download é o link raw/download
-        html += `<tr><td class="small">${escapeHtml(f.name)}</td><td class="right small">${kb} KB</td><td class="small"><div class="actions"><button style=\"background:transparent;border:1px solid rgba(2,59,107,0.06);border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--dark);\" data-download=\"${encodeURI(f.download_url)}\" data-html=\"${encodeURI(f.html_url)}\" data-name=\"${escapeHtmlAttr(f.name)}\" class=\"viewBtn\">Visualizar</button><a class=\"btn\" href=\"${encodeURI(f.download_url||f.html_url)}\" target=\"_blank\" rel=\"noopener\">Baixar</a></div></td></tr>`
+        html += `<tr><td class="small">${escapeHtml(f.name)}</td><td class="right small">${kb} KB</td><td class="small"><div class="actions"><button style=\"background:transparent;border:1px solid rgba(2,59,107,0.06);border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--dark);\" data-url=\"${encodeURI(f.download_url)}\" data-name=\"${escapeHtmlAttr(f.name)}\" class=\"viewBtn\">Visualizar</button><a class=\"btn\" href=\"${encodeURI(f.download_url)}\" target=\"_blank\" rel=\"noopener\">Baixar</a></div></td></tr>`
       })
       html += '</tbody></table>'
       resultsArea.innerHTML = html
 
       document.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', (e)=>{
-        const downloadUrl = btn.getAttribute('data-download')
-        const htmlUrl = btn.getAttribute('data-html')
+        const url = btn.getAttribute('data-url')
         const name = btn.getAttribute('data-name')
-        openPreviewWithFallback(downloadUrl, htmlUrl, name)
+        openPreview(url, name)
       }))
     }
 
     function getExtension(name){ const parts = name.split('.') ; if(parts.length < 2) return '' ; return parts.pop().toLowerCase() }
 
-    // nova função: tenta download_url, se falhar abre html_url em nova aba
-    async function openPreviewWithFallback(downloadUrl, htmlUrl, name){
+    async function openPreview(url, name){
       const ext = getExtension(name)
       const modal = document.getElementById('modal')
       const modalBody = document.getElementById('modalBody')
       const modalTitle = document.getElementById('modalTitle')
       const modalDownload = document.getElementById('modalDownload')
-
       modalTitle.textContent = name
-      // botão de download aponta preferencialmente para downloadUrl; se não existir, aponta para htmlUrl
-      modalDownload.href = downloadUrl || htmlUrl || '#'
+      modalDownload.href = url
 
       const images = ['png','jpg','jpeg','gif','bmp','webp']
       const textTypes = ['txt','md','csv','log','json']
@@ -257,52 +264,32 @@ Filtros por categoria: POPs, Fluxos, Documentos Institucionais, Formulários, Ou
       modal.style.display = 'flex'
       modal.setAttribute('aria-hidden','false')
 
-      // revoga blob anterior se existir
+      // limpar blob anterior se houver
       if(modal.dataset.blobUrl){ try{ URL.revokeObjectURL(modal.dataset.blobUrl) }catch(e){} delete modal.dataset.blobUrl }
 
       try{
         if(ext === 'pdf'){
-          if(!downloadUrl){
-            // sem downloadUrl: abrir página do GitHub
-            window.open(htmlUrl, '_blank', 'noopener')
-            closeModal()
-            return
-          }
-
-          // tenta buscar raw como blob (melhor compatibilidade com iframe)
-          const res = await fetch(downloadUrl)
+          // buscar como blob e criar URL para evitar problemas de CORS/X-Frame
+          const res = await fetch(url)
           if(res.ok){
             const blob = await res.blob()
             const blobUrl = URL.createObjectURL(blob)
             modalBody.innerHTML = `<iframe src="${blobUrl}"></iframe>`
             modal.dataset.blobUrl = blobUrl
-            return
-          }
-
-          // se não ok (404, 403, etc.), fallback: abrir a página do GitHub (htmlUrl)
-          window.open(htmlUrl, '_blank', 'noopener')
-          closeModal()
-          return
-
-        }else if(images.includes(ext)){
-          // imagens normalmente funcionam com link direto
-          modalBody.innerHTML = `<img src="${downloadUrl||htmlUrl}" alt="${escapeHtml(name)}">`
-        }else if(textTypes.includes(ext)){
-          const res = await fetch(downloadUrl||htmlUrl)
-          if(res.ok){
-            const txt = await res.text()
-            modalBody.innerHTML = `<pre class=\"txtview\">${escapeHtml(txt)}</pre>`
           }else{
-            window.open(htmlUrl, '_blank', 'noopener')
-            closeModal()
+            modalBody.innerHTML = '<div class="muted">Não foi possível carregar a visualização. Abra em nova aba para baixar.</div>'
           }
+        }else if(images.includes(ext)){
+          modalBody.innerHTML = `<img src="${url}" alt="${escapeHtml(name)}">`
+        }else if(textTypes.includes(ext)){
+          const res = await fetch(url)
+          const txt = await res.text()
+          modalBody.innerHTML = `<pre class=\"txtview\">${escapeHtml(txt)}</pre>`
         }else{
           modalBody.innerHTML = '<div class="muted">Pré-visualização não disponível para este tipo de arquivo. Use o botão Baixar.</div>'
         }
       }catch(err){
-        // erro de rede/CORS: fallback para abrir página do GitHub
-        try{ window.open(htmlUrl, '_blank', 'noopener') }catch(e){}
-        closeModal()
+        modalBody.innerHTML = '<div class="muted">Erro ao carregar arquivo para visualização.</div>'
       }
     }
 
@@ -314,7 +301,7 @@ Filtros por categoria: POPs, Fluxos, Documentos Institucionais, Formulários, Ou
       document.getElementById('modalBody').innerHTML = ''
     }
 
-    function escapeHtml(s){ if(!s) return '' ; return String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c])) }
+    function escapeHtml(s){ if(!s) return '' ; return String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
     function escapeHtmlAttr(s){ return escapeHtml(s).replace(/\"/g,'&quot;') }
   </script>
 </body>
