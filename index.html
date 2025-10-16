@@ -1,29 +1,17 @@
 <!--
-Versão do USUÁRIO — Repositório de Documentos (visualização, busca, filtros e download)
+Versão do USUÁRIO — Repositório de Documentos (diagnóstico de raw + fallback robusto)
 
-Paleta de cores aplicada conforme solicitado:
-- Primária (detalhes/ações): #00c1f6
-- Fundo suave: #fffcfa
-- Texto / título / ênfase escura: #023b6b
+Atualização importante aplicada:
+- Agora, ao carregar a lista, o script testa se o `download_url` (raw) de cada arquivo está acessível (HEAD request). Isso permite identificar quais arquivos retornam 404/403 (possível Git LFS ou problema no raw).
+- A tabela mostra um **badge** indicando se o raw está acessível (✔️) ou se há problema (⚠️ - usar fallback). Para arquivos com problema, o botão Visualizar abre a página do GitHub (`html_url`) diretamente, evitando erro 404.
+- A função de preview tenta exibir PDFs/ imagens/ textos via blob. Se o raw falhar, faz fallback automático para a página do GitHub.
 
-O que foi adicionado nesta versão:
-- Visualização de PDFs implementada via fetch + Blob -> iframe (melhora compatibilidade quando a exibição direta falha);
-- Sistema de filtros por tipo de documento (POPs, Fluxos, Documentos Institucionais, Formulários e Outros). A categoria é detectada automaticamente pelo nome do arquivo (palavras-chaves). Você pode marcar/desmarcar as categorias para filtrar a lista;
-- Mantive a pesquisa por nome e os botões de visualizar/baixar.
+Observações técnicas:
+- Testes HEAD podem ser bloqueados por CORS em alguns casos; quando o HEAD falhar, tentamos um GET leve como second check.
+- Se muitos arquivos forem testados, a API do GitHub pode aplicar rate limits — isso é raro para pequenas listas, mas cuidado em repositórios com centenas de arquivos.
+- Se os arquivos estiverem no Git LFS, o raw frequentemente não estará disponível: o GitHub serve um ponteiro em vez do conteúdo bruto. Nesse caso reenvie sem LFS ou hospede os PDFs em storage alternativo.
 
-Como funciona o filtro (detecção automática):
-- Se o nome do arquivo contiver palavras como "pop" ou "pops" será classificado como POPs.
-- "fluxo" ou "fluxos" → Fluxos.
-- "form" ou "formulario" → Formulários.
-- "institucional" ou "documento" → Documentos Institucionais.
-- Caso não encontre correspondência, o arquivo entra em "Outros".
-
-Instruções rápidas de uso:
-1) Preencha OWNER e REPO no topo do script com os dados do seu repositório público e confirme PATH (ex.: documents).
-2) Publique no GitHub Pages ou abra localmente.
-3) A página carregará os arquivos, você poderá filtrar por categoria e pesquisar por nome.
-
-OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, eu posso ajustar as palavras-chave para combinar com o padrão dos seus arquivos.
+Uso: atualize as constantes OWNER/REPO/PATH no topo do script e teste.
 -->
 
 <!doctype html>
@@ -40,6 +28,8 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
       --dark: #023b6b;      /* texto / títulos */
       --muted: rgba(2,59,107,0.65);
       --border: rgba(2,59,107,0.06);
+      --ok: #16a34a;
+      --warn: #d97706;
     }
 
     *{box-sizing:border-box}
@@ -74,6 +64,9 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
 
     .actions{display:flex;gap:8px}
 
+    .badge-ok{color:var(--ok);font-weight:700;margin-right:8px}
+    .badge-warn{color:var(--warn);font-weight:700;margin-right:8px}
+
     .modal-backdrop{position:fixed;inset:0;background:rgba(2,59,107,0.28);display:none;align-items:center;justify-content:center;padding:20px;z-index:999}
     .modal{background:var(--card);border-radius:10px;max-width:980px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 16px 48px rgba(2,59,107,0.16);border:1px solid rgba(2,59,107,0.06)}
     .modal header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(2,59,107,0.04)}
@@ -96,7 +89,7 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
     <header>
       <h1 style="color:var(--dark)">Repositório de Documentos</h1>
     </header>
-    <p class="lead">Pesquise e acesse documentos disponibilizados pelo administrador. Você pode visualizar diretamente (PDF/imagem/texto) ou baixar.</p>
+    <p class="lead">Pesquise e acesse documentos disponibilizados pelo administrador. Você pode visualizar diretamente (PDF/imagem/texto) ou baixar. O sistema agora indica se o arquivo raw está acessível (✔️) ou se há problema (⚠️).</p>
 
     <div class="card">
       <div class="controls">
@@ -174,10 +167,14 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
         const res = await fetch(url)
         if(!res.ok){ resultsArea.innerHTML = `<div class="muted">Erro ao acessar repositório (status ${res.status}). Confirme as configurações e se o repo é público.</div>`; return }
         const data = await res.json()
-        files = data.filter(i => i.type === 'file').map(f => ({ name: f.name, size: f.size, download_url: f.download_url }))
+        // mapear download_url e html_url (html_url direciona para a página do GitHub do arquivo)
+        files = data.filter(i => i.type === 'file').map(f => ({ name: f.name, size: f.size, download_url: f.download_url, html_url: f.html_url }))
 
         // detectar categoria para cada arquivo
         files.forEach(f => f.category = detectCategory(f.name))
+
+        // checar disponibilidade do download_url para cada arquivo (HEAD -> GET fallback)
+        await Promise.all(files.map(f => checkRawAvailability(f)))
 
         // montar filtros automaticamente (usamos categorias pre-definidas + outros)
         buildFilters()
@@ -185,6 +182,30 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
       }catch(err){
         resultsArea.innerHTML = '<div class="muted">Erro ao acessar API: '+ err.message +'</div>'
       }
+    }
+
+    // testa se o download_url responde OK
+    async function checkRawAvailability(file){
+      file.rawAccessible = false
+      if(!file.download_url) return
+      try{
+        // primeiro tenta HEAD
+        const controller = new AbortController(); const timeout = setTimeout(()=>controller.abort(), 6000)
+        let res = await fetch(file.download_url, { method:'HEAD', signal: controller.signal })
+        clearTimeout(timeout)
+        if(res && res.ok){ file.rawAccessible = true; return }
+      }catch(e){ /* ignora */ }
+
+      // HEAD pode falhar por CORS; tenta GET com pequeno range como alternativa
+      try{
+        const controller2 = new AbortController(); const timeout2 = setTimeout(()=>controller2.abort(), 6000)
+        const res2 = await fetch(file.download_url, { method:'GET', headers:{ 'Range':'bytes=0-1023' }, signal: controller2.signal })
+        clearTimeout(timeout2)
+        if(res2 && (res2.status === 200 || res2.status === 206)) { file.rawAccessible = true; return }
+      }catch(e){ /* ignora */ }
+
+      // se chegou aqui, raw não acessível
+      file.rawAccessible = false
     }
 
     function detectCategory(name){
@@ -204,13 +225,13 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
         activeFilters.add(c.key)
         const div = document.createElement('label')
         div.className = 'filter-item'
-        div.innerHTML = `<input type=\"checkbox\" data-key=\"${c.key}\" ${checked? 'checked':''}> ${c.label}`
+        div.innerHTML = `<input type="checkbox" data-key="${c.key}" ${checked? 'checked':''}> ${c.label}`
         filtersEl.appendChild(div)
       })
       // adicionar 'Outros'
       const divo = document.createElement('label')
       divo.className = 'filter-item'
-      divo.innerHTML = `<input type=\"checkbox\" data-key=\"outros\" checked> Outros`
+      divo.innerHTML = `<input type="checkbox" data-key="outros" checked> Outros`
       filtersEl.appendChild(divo)
 
       // listeners
@@ -234,28 +255,32 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
       let html = '<table><thead><tr><th>Nome</th><th class="right">Tamanho</th><th>Ações</th></tr></thead><tbody>'
       filtered.forEach(f => {
         const kb = Math.round((f.size||0)/10.24)/100
-        html += `<tr><td class="small">${escapeHtml(f.name)}</td><td class="right small">${kb} KB</td><td class="small"><div class="actions"><button style=\"background:transparent;border:1px solid rgba(2,59,107,0.06);border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--dark);\" data-url=\"${encodeURI(f.download_url)}\" data-name=\"${escapeHtmlAttr(f.name)}\" class=\"viewBtn\">Visualizar</button><a class=\"btn\" href=\"${encodeURI(f.download_url)}\" target=\"_blank\" rel=\"noopener\">Baixar</a></div></td></tr>`
+        const badge = f.rawAccessible ? '<span class="badge-ok">✔️</span>' : '<span class="badge-warn">⚠️</span>'
+        // data-html é a página do GitHub (fallback), data-download é o link raw/download
+        html += `<tr><td class="small">${badge}${escapeHtml(f.name)}</td><td class="right small">${kb} KB</td><td class="small"><div class="actions"><button style=\"background:transparent;border:1px solid rgba(2,59,107,0.06);border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--dark);\" data-download=\"${encodeURI(f.download_url||'')}\" data-html=\"${encodeURI(f.html_url||'')}\" data-name=\"${escapeHtmlAttr(f.name)}\" class=\"viewBtn\">Visualizar</button><a class=\"btn\" href=\"${encodeURI(f.rawAccessible?f.download_url:f.html_url||f.download_url)}\" target=\"_blank\" rel=\"noopener\">Baixar</a></div></td></tr>`
       })
       html += '</tbody></table>'
       resultsArea.innerHTML = html
 
       document.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', (e)=>{
-        const url = btn.getAttribute('data-url')
+        const downloadUrl = decodeURI(btn.getAttribute('data-download'))
+        const htmlUrl = decodeURI(btn.getAttribute('data-html'))
         const name = btn.getAttribute('data-name')
-        openPreview(url, name)
+        openPreviewWithFallback(downloadUrl, htmlUrl, name)
       }))
     }
 
     function getExtension(name){ const parts = name.split('.') ; if(parts.length < 2) return '' ; return parts.pop().toLowerCase() }
 
-    async function openPreview(url, name){
+    async function openPreviewWithFallback(downloadUrl, htmlUrl, name){
       const ext = getExtension(name)
       const modal = document.getElementById('modal')
       const modalBody = document.getElementById('modalBody')
       const modalTitle = document.getElementById('modalTitle')
       const modalDownload = document.getElementById('modalDownload')
+
       modalTitle.textContent = name
-      modalDownload.href = url
+      modalDownload.href = downloadUrl || htmlUrl || '#'
 
       const images = ['png','jpg','jpeg','gif','bmp','webp']
       const textTypes = ['txt','md','csv','log','json']
@@ -264,32 +289,38 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
       modal.style.display = 'flex'
       modal.setAttribute('aria-hidden','false')
 
-      // limpar blob anterior se houver
       if(modal.dataset.blobUrl){ try{ URL.revokeObjectURL(modal.dataset.blobUrl) }catch(e){} delete modal.dataset.blobUrl }
 
       try{
         if(ext === 'pdf'){
-          // buscar como blob e criar URL para evitar problemas de CORS/X-Frame
-          const res = await fetch(url)
+          if(!downloadUrl){ window.open(htmlUrl, '_blank', 'noopener'); closeModal(); return }
+
+          // tenta buscar raw como blob
+          const res = await fetch(downloadUrl)
           if(res.ok){
             const blob = await res.blob()
             const blobUrl = URL.createObjectURL(blob)
             modalBody.innerHTML = `<iframe src="${blobUrl}"></iframe>`
             modal.dataset.blobUrl = blobUrl
-          }else{
-            modalBody.innerHTML = '<div class="muted">Não foi possível carregar a visualização. Abra em nova aba para baixar.</div>'
+            return
           }
+
+          // fallback: abrir página do GitHub
+          window.open(htmlUrl, '_blank', 'noopener')
+          closeModal()
+          return
+
         }else if(images.includes(ext)){
-          modalBody.innerHTML = `<img src="${url}" alt="${escapeHtml(name)}">`
+          modalBody.innerHTML = `<img src="${downloadUrl||htmlUrl}" alt="${escapeHtml(name)}">`
         }else if(textTypes.includes(ext)){
-          const res = await fetch(url)
-          const txt = await res.text()
-          modalBody.innerHTML = `<pre class=\"txtview\">${escapeHtml(txt)}</pre>`
+          const res = await fetch(downloadUrl||htmlUrl)
+          if(res.ok){ const txt = await res.text(); modalBody.innerHTML = `<pre class=\"txtview\">${escapeHtml(txt)}</pre>` } else { window.open(htmlUrl, '_blank', 'noopener'); closeModal() }
         }else{
           modalBody.innerHTML = '<div class="muted">Pré-visualização não disponível para este tipo de arquivo. Use o botão Baixar.</div>'
         }
       }catch(err){
-        modalBody.innerHTML = '<div class="muted">Erro ao carregar arquivo para visualização.</div>'
+        try{ window.open(htmlUrl, '_blank', 'noopener') }catch(e){}
+        closeModal()
       }
     }
 
@@ -301,7 +332,7 @@ OBS: o mecanismo de classificação depende dos nomes dos arquivos. Se quiser, e
       document.getElementById('modalBody').innerHTML = ''
     }
 
-    function escapeHtml(s){ if(!s) return '' ; return String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+    function escapeHtml(s){ if(!s) return '' ; return String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c])) }
     function escapeHtmlAttr(s){ return escapeHtml(s).replace(/\"/g,'&quot;') }
   </script>
 </body>
